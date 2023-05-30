@@ -131,6 +131,8 @@ func getPrefixByMetricType(mType string) string {
 		prefix = service
 	case TypeClusterNamespace:
 		prefix = namespace
+	case TypePodStatus:
+		prefix = podStatusPrefix
 	default:
 		log.Printf("E! Unexpected MetricType: %s", mType)
 	}

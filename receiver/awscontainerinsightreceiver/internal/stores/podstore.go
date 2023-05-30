@@ -402,9 +402,30 @@ func (p *PodStore) decorateMem(metric CIMetric, pod *corev1.Pod) {
 	}
 }
 
+var PodPhaseMetricNames = map[string]string{
+	"Pending":   ci.MetricName(ci.TypePodStatus, "pending"),
+	"Running":   ci.MetricName(ci.TypePodStatus, "running"),
+	"Succeeded": ci.MetricName(ci.TypePodStatus, "succeeded"),
+	"Failed":    ci.MetricName(ci.TypePodStatus, "failed"),
+	"Unknown":   ci.MetricName(ci.TypePodStatus, "unknown"),
+}
+
+func (p *PodStore) addPodStatusMetrics(metric CIMetric, pod *corev1.Pod) {
+	for _, metricName := range PodPhaseMetricNames {
+		metric.AddField(metricName, 0)
+	}
+
+	statusMetricName, validStatus := PodPhaseMetricNames[string(pod.Status.Phase)]
+	if validStatus {
+		metric.AddField(statusMetricName, 1)
+	}
+}
+
 func (p *PodStore) addStatus(metric CIMetric, pod *corev1.Pod) {
 	if metric.GetTag(ci.MetricType) == ci.TypePod {
 		metric.AddTag(ci.PodStatus, string(pod.Status.Phase))
+		p.addPodStatusMetrics(metric, pod)
+
 		var curContainerRestarts int
 		for _, containerStatus := range pod.Status.ContainerStatuses {
 			curContainerRestarts += int(containerStatus.RestartCount)
