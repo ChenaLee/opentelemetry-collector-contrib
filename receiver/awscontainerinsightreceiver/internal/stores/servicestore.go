@@ -80,10 +80,5 @@ func (s *ServiceStore) refresh(ctx context.Context) {
 
 func addServiceNameTag(metric CIMetric, serviceNames []string) {
 	// TODO handle serviceNames len is larger than 1. We need to duplicate the metric object
-	if (len(serviceNames) > 1) {
-		metric.AddTag(ci.TypeService, serviceNames[1])
-	}
-	else {
-		metric.AddTag(ci.TypeService, serviceNames[0])
-	}
+	metric.AddTag(ci.TypeService, serviceNames[0])
 }
