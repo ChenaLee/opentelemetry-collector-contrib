@@ -59,7 +59,7 @@ func newClient(set exporter.CreateSettings, cfg *Config, maxContentLength uint) 
 		logger:            set.Logger,
 		telemetrySettings: set.TelemetrySettings,
 		buildInfo:         set.BuildInfo,
-		bufferStatePool:   newBufferStatePool(maxContentLength, !cfg.DisableCompression, cfg.MaxEventSize),
+		bufferStatePool:   newBufferStatePool(maxContentLength, !cfg.DisableCompression),
 	}
 }
 
@@ -198,7 +198,7 @@ func (c *client) fillLogsBuffer(logs plog.Logs, bs *bufferState, is iterState) (
 
 					// JSON encoding event and writing to buffer.
 					var err error
-					b, err = marshalEvent(event, bs.jsonStream)
+					b, err = marshalEvent(event, c.config.MaxEventSize, bs.jsonStream)
 					if err != nil {
 						permanentErrors = append(permanentErrors, consumererror.NewPermanent(fmt.Errorf(
 							"dropped log event: %v, error: %w", event, err)))
@@ -219,7 +219,7 @@ func (c *client) fillLogsBuffer(logs plog.Logs, bs *bufferState, is iterState) (
 					}
 					permanentErrors = append(permanentErrors, consumererror.NewPermanent(
 						fmt.Errorf("dropped log event: error: event size %d bytes larger than configured max"+
-							" content length %d bytes", len(b), bs.bufferMaxLen)))
+							" content length %d bytes", len(b), c.config.MaxContentLengthLogs)))
 					return iterState{i, j, k + 1, false}, permanentErrors
 				}
 			}
@@ -255,7 +255,7 @@ func (c *client) fillMetricsBuffer(metrics pmetric.Metrics, bs *bufferState, is 
 				}
 				for _, event := range events {
 					// JSON encoding event and writing to buffer.
-					b, err := marshalEvent(event, bs.jsonStream)
+					b, err := marshalEvent(event, c.config.MaxEventSize, bs.jsonStream)
 					if err != nil {
 						permanentErrors = append(permanentErrors, consumererror.NewPermanent(fmt.Errorf("dropped metric event: %v, error: %w", event, err)))
 						continue
@@ -277,7 +277,7 @@ func (c *client) fillMetricsBuffer(metrics pmetric.Metrics, bs *bufferState, is 
 					}
 					permanentErrors = append(permanentErrors, consumererror.NewPermanent(
 						fmt.Errorf("dropped metric event: error: event size %d bytes larger than configured max"+
-							" content length %d bytes", len(b), bs.bufferMaxLen)))
+							" content length %d bytes", len(b), c.config.MaxContentLengthMetrics)))
 					return iterState{i, j, k + 1, false}, permanentErrors
 				}
 			}
@@ -303,7 +303,7 @@ func (c *client) fillTracesBuffer(traces ptrace.Traces, bs *bufferState, is iter
 				event := mapSpanToSplunkEvent(rs.Resource(), span, c.config)
 
 				// JSON encoding event and writing to buffer.
-				b, err := marshalEvent(event, bs.jsonStream)
+				b, err := marshalEvent(event, c.config.MaxEventSize, bs.jsonStream)
 				if err != nil {
 					permanentErrors = append(permanentErrors, consumererror.NewPermanent(fmt.Errorf("dropped span events: %v, error: %w", event, err)))
 					continue
@@ -322,7 +322,7 @@ func (c *client) fillTracesBuffer(traces ptrace.Traces, bs *bufferState, is iter
 					}
 					permanentErrors = append(permanentErrors, consumererror.NewPermanent(
 						fmt.Errorf("dropped span event: error: event size %d bytes larger than configured max"+
-							" content length %d bytes", len(b), bs.bufferMaxLen)))
+							" content length %d bytes", len(b), c.config.MaxContentLengthTraces)))
 					return iterState{i, j, k + 1, false}, permanentErrors
 				}
 			}
@@ -381,7 +381,7 @@ func (c *client) pushTracesDataInBatches(ctx context.Context, td ptrace.Traces, 
 }
 
 func (c *client) postEvents(ctx context.Context, bufState *bufferState, headers map[string]string) error {
-	if err := bufState.Close(); err != nil {
+	if err := bufState.buf.Close(); err != nil {
 		return err
 	}
 	return c.hecWorker.send(ctx, bufState, headers)
@@ -523,7 +523,7 @@ func (c *client) stop(context.Context) error {
 	return nil
 }
 
-func (c *client) start(ctx context.Context, host component.Host) (err error) {
+func (c *client) start(_ context.Context, host component.Host) (err error) {
 
 	httpClient, err := buildHTTPClient(c.config, host, c.telemetrySettings)
 	if err != nil {
@@ -596,12 +596,15 @@ func buildHTTPHeaders(config *Config, buildInfo component.BuildInfo) map[string]
 }
 
 // marshalEvent marshals an event to JSON using a reusable jsoniter stream.
-func marshalEvent(event *splunk.Event, stream *jsoniter.Stream) ([]byte, error) {
+func marshalEvent(event *splunk.Event, sizeLimit uint, stream *jsoniter.Stream) ([]byte, error) {
 	stream.Reset(nil)
 	stream.Error = nil
 	stream.WriteVal(event)
 	if stream.Error != nil {
 		return nil, stream.Error
+	}
+	if uint(stream.Buffered()) > sizeLimit {
+		return nil, fmt.Errorf("event size %d exceeds limit %d", stream.Buffered(), sizeLimit)
 	}
 	return stream.Buffer(), nil
 }

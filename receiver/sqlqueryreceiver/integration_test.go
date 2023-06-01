@@ -9,6 +9,7 @@ package sqlqueryreceiver
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ const (
 	mysqlPort      = "3306"
 )
 
-func TestPostgresIntegration(t *testing.T) {
+func TestPostgresqlIntegration(t *testing.T) {
 	scraperinttest.NewIntegrationTest(
 		NewFactory(),
 		scraperinttest.WithContainerRequest(
@@ -134,9 +135,11 @@ func TestPostgresIntegration(t *testing.T) {
 // This test ensures the collector can connect to an Oracle DB, and properly get metrics. It's not intended to
 // test the receiver itself.
 func TestOracleDBIntegration(t *testing.T) {
+	if runtime.GOARCH == "arm64" {
+		t.Skip("Incompatible with arm64")
+	}
 	scraperinttest.NewIntegrationTest(
 		NewFactory(),
-		scraperinttest.WithDumpActualOnFailure(),
 		scraperinttest.WithContainerRequest(
 			testcontainers.ContainerRequest{
 				FromDockerfile: testcontainers.FromDockerfile{
@@ -147,14 +150,14 @@ func TestOracleDBIntegration(t *testing.T) {
 				// The Oracle DB container takes close to 10 minutes on a local machine
 				// to do the default setup, so the best way to account for startup time
 				// is to wait for the container to be healthy before continuing test.
-				WaitingFor: wait.NewHealthStrategy().WithStartupTimeout(15 * time.Minute),
+				WaitingFor: wait.NewHealthStrategy().WithStartupTimeout(30 * time.Minute),
 			}),
-		scraperinttest.WithCreateContainerTimeout(15*time.Minute),
+		scraperinttest.WithCreateContainerTimeout(30*time.Minute),
 		scraperinttest.WithCustomConfig(
 			func(t *testing.T, cfg component.Config, ci *scraperinttest.ContainerInfo) {
 				rCfg := cfg.(*Config)
 				rCfg.Driver = "oracle"
-				rCfg.DataSource = fmt.Sprintf("oracle://otel:password@%s:%s/XE",
+				rCfg.DataSource = fmt.Sprintf("oracle://otel:p@ssw%%25rd@%s:%s/XE",
 					ci.Host(t), ci.MappedPort(t, oraclePort))
 				rCfg.Queries = []Query{
 					{
